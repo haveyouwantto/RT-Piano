@@ -30,12 +30,13 @@ document.addEventListener('DOMContentLoaded', () => {
         users.forEach(user => {
             // Preserve existing client data like clockOffset when the list updates
             const existingClient = clientData.get(user.id) || {};
+            user.cssColor = hsvToHslCss(user.color);
             clientData.set(user.id, { ...user, ...existingClient });
 
             const li = document.createElement('li');
             const swatch = document.createElement('span');
             swatch.className = 'client-color-swatch';
-            swatch.style.backgroundColor = hsvToHslCss(user.color);
+            swatch.style.backgroundColor = user.cssColor;
 
             const name = document.createTextNode(user.ip);
 
@@ -273,7 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const visualDelayMs = Math.max(0, (scheduledTime - audioContext.currentTime) * 1000);
 
         setTimeout(() => {
-            createNoteVisual(midi, hsvToHslCss(client.color));
+            createNoteVisual(midi, client.cssColor);
         }, visualDelayMs);
     };
 
