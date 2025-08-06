@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const noteVisualizer = document.getElementById('note-visualizer');
     const clientList = document.getElementById('client-list');
     const latencyDiv = document.getElementById('latency-value');
-    let JITTER_BUFFER_SECONDS = 0.150;
+    let JITTER_BUFFER_SECONDS = 0.1; // 初始抖动缓冲时间
 
     const real = new Float32Array([0, 1, 1.515e-2, 8.5e-3, 5.923e-3, 4.6e-3, 2.8e-2, 1.75e-2, 3.092e-3, 2.581e-3, 2.401e-3, 2.078e-3, 1.933e-3, 1.865e-3,
         1.515e-2, 1.397e-3, 1.253e-3, 1.347e-3, 1.253e-3, 1.209e-3, 1.166e-3, 4.279e-3, 1.253e-3, 1.125e-3, 1.046e-3, 9.733e-4, 1.009e-3, 9.054e-4, 9.387e-4, 8.423e-4, 8.733e-4, 8.423e-4, 8.423e-4]);
@@ -61,7 +61,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const latencyMeasurement = () => {
         let time = performance.now();
         socket.emit('ping', () => {
-            latencyDiv.textContent = (performance.now() - time).toFixed(1);
+            let latency = performance.now() - time;
+            latencyDiv.textContent = (latency).toFixed(1);
+
+            // 更新抖动缓冲时间
+            JITTER_BUFFER_SECONDS = Math.min(1, ((latency / 1000) * 0.5 + JITTER_BUFFER_SECONDS * 0.5))
+            console.log(`Latency: ${latency.toFixed(1)} ms, Jitter Buffer: ${JITTER_BUFFER_SECONDS.toFixed(3)} seconds`);
         });
     }
     setInterval(latencyMeasurement, 10000);
@@ -267,7 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
             client.timeOffset = audioContext.currentTime - eventTime;
             console.debug(`Setting timeOffset for ${client.ip} to ${client.timeOffset.toFixed(3)}s`);
         }
-        scheduledTime = eventTime + client.timeOffset + JITTER_BUFFER_SECONDS ;
+        scheduledTime = eventTime + client.timeOffset + JITTER_BUFFER_SECONDS;
 
         // To prevent a flood of notes from a misbehaving client or clock error,
         // don't schedule things too far in the future.
@@ -290,7 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!audioContext) initAudioContext();
         // For local messages, the scheduled time is *now*.
         const scheduledTime = audioContext.currentTime;
-        const midiData = { command: message.data[0], note: message.data[1], velocity: message.data[2], time: scheduledTime };
+        const midiData = { command: message.data[0], note: message.data[1], velocity: message.data[2], time: scheduledTime + JITTER_BUFFER_SECONDS};
 
         // Handle locally immediately
         handleMIDIMessage(myId, midiData, scheduledTime);
