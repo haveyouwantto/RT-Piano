@@ -8,6 +8,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const clientList = document.getElementById('client-list');
     const JITTER_BUFFER_SECONDS = 0.150;
 
+    const real = new Float32Array([0, 1, 1.515e-2, 8.5e-3, 5.923e-3, 4.6e-3, 2.8e-2, 1.75e-2, 3.092e-3, 2.581e-3, 2.401e-3, 2.078e-3, 1.933e-3, 1.865e-3,
+        1.515e-2, 1.397e-3, 1.253e-3, 1.347e-3, 1.253e-3, 1.209e-3, 1.166e-3, 4.279e-3, 1.253e-3, 1.125e-3, 1.046e-3, 9.733e-4, 1.009e-3, 9.054e-4, 9.387e-4, 8.423e-4, 8.733e-4, 8.423e-4, 8.423e-4]);
+    const imag = new Float32Array(real.length).fill(0);
+    let wave;
+
     // 状态与配置
     let audioContext;
     let compressor;
@@ -58,8 +63,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 compressor = audioContext.createDynamicsCompressor();
                 compressor.connect(audioContext.destination);
+                wave = audioContext.createPeriodicWave(real, imag);
                 statusDiv.textContent = '音频已就绪。请选择MIDI设备。';
-            } catch (e) { alert('此浏览器不支持Web Audio API'); }
+            } catch (e) { 
+                console.error('初始化音频上下文时出错:', e);
+                alert('此浏览器不支持Web Audio API'); 
+            }
         }
     };
     document.body.addEventListener('click', initAudioContext, { once: true });
@@ -89,17 +98,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const playNoteAudio = (midi, velocity, time) => {
         if (!audioContext) return;
 
-        const gainValue = velocity / 127;
+        const gainValue = velocity / 128;
         const freq = Math.pow(2, (midi - 69) / 12) * 440;
 
         const decayTime = 0.2 * Math.pow(2, (69 - midi) / 24);
         const envelope = audioContext.createGain();
         envelope.gain.setValueAtTime(0, time);
-        envelope.gain.linearRampToValueAtTime(gainValue, time + 0.002); // More responsive attack
-        envelope.gain.setTargetAtTime(0, time + 0.01, decayTime);
+        envelope.gain.linearRampToValueAtTime(gainValue * 0.3, time + 0.001); // More responsive attack
+        envelope.gain.setTargetAtTime(0, time + 0.002, decayTime);
 
         const oscillator = audioContext.createOscillator();
-        oscillator.type = 'triangle';
+        oscillator.setPeriodicWave(wave);
         oscillator.frequency.setValueAtTime(freq, time);
         oscillator.connect(envelope).connect(compressor);
         oscillator.start(time);
