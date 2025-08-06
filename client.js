@@ -241,7 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
             command: view.getUint8(0),
             note: view.getUint8(1),
             velocity: view.getUint8(2),
-            time: view.getFloat32(3, true)
+            time: view.getFloat32(3, true) + JITTER_BUFFER_SECONDS // Add jitter buffer
         };
 
         let scheduledTime;
@@ -250,15 +250,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // This should not happen if the server is working correctly, but as a safeguard:
         if (!client) return;
 
-        // If clockOffset is not yet calculated for this client, calculate it now.
-        if (client.clockOffset === undefined) {
-            // Offset = local time when we received message - time the message was sent + buffer
-            client.clockOffset = audioContext.currentTime - parsedData.time + JITTER_BUFFER_SECONDS;
-            console.log(`Initialized clock offset for ${client.ip}: ${client.clockOffset.toFixed(3)}s`);
-        }
+        // Event time is the time field from the received message
+        let eventTime = parsedData.time;
 
-        // The scheduled play time on our local AudioContext timeline
-        scheduledTime = parsedData.time + client.clockOffset;
+        if (!client.timeOffset) {
+            client.timeOffset = audioContext.currentTime - eventTime;
+            console.debug(`Setting timeOffset for ${client.ip} to ${client.timeOffset.toFixed(3)}s`);
+        }
+        scheduledTime = eventTime + client.timeOffset;
 
         // To prevent a flood of notes from a misbehaving client or clock error,
         // don't schedule things too far in the future.
