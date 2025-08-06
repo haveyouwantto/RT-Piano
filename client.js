@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('update-user-list', (users) => {
         clientList.innerHTML = '';
         users.forEach(user => {
+            console.log(user, myId)
             // Preserve existing client data like clockOffset when the list updates
             const existingClient = clientData.get(user.id) || {};
             user.cssColor = hsvToHslCss(user.color);
@@ -65,9 +66,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 compressor.connect(audioContext.destination);
                 wave = audioContext.createPeriodicWave(real, imag);
                 statusDiv.textContent = '音频已就绪。请选择MIDI设备。';
-            } catch (e) { 
+            } catch (e) {
                 console.error('初始化音频上下文时出错:', e);
-                alert('此浏览器不支持Web Audio API'); 
+                alert('此浏览器不支持Web Audio API');
             }
         }
     };
@@ -90,6 +91,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const l = v * (1 - s / 2);
         const s_hsl = l === 0 || l === 1 ? 0 : (v - l) / Math.min(l, 1 - l);
         return `hsl(${h}, ${s_hsl * 100}%, ${l * 100}%)`;
+    }
+
+    function arrayBufferToBase64(buffer) {
+        const binary = String.fromCharCode(...new Uint8Array(buffer));
+        return btoa(binary);
+    }
+
+    function base64ToArrayBuffer(base64) {
+        const binary = atob(base64);
+        const len = binary.length;
+        const buffer = new ArrayBuffer(len);
+        const view = new Uint8Array(buffer);
+        for (let i = 0; i < len; i++) {
+            view[i] = binary.charCodeAt(i);
+        }
+        return buffer;
     }
 
     const isSharp = (midi) => [1, 3, 6, 8, 10].includes(midi % 12);
@@ -204,8 +221,17 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     socket.on('midi', (message) => {
-        const { senderId, midiData } = message;
+        const { s: senderId, m: midiData } = message;
         if (!audioContext) return; // Audio not ready
+
+        const binaryData = base64ToArrayBuffer(midiData);
+        const view = new DataView(binaryData);
+        const parsedData = {
+            command: view.getUint8(0),
+            note: view.getUint8(1),
+            velocity: view.getUint8(2),
+            time: view.getFloat32(3, true)
+        };
 
         let scheduledTime;
         const client = clientData.get(senderId);
@@ -216,12 +242,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // If clockOffset is not yet calculated for this client, calculate it now.
         if (client.clockOffset === undefined) {
             // Offset = local time when we received message - time the message was sent + buffer
-            client.clockOffset = audioContext.currentTime - midiData.time + JITTER_BUFFER_SECONDS;
+            client.clockOffset = audioContext.currentTime - parsedData.time + JITTER_BUFFER_SECONDS;
             console.log(`Initialized clock offset for ${client.ip}: ${client.clockOffset.toFixed(3)}s`);
         }
 
         // The scheduled play time on our local AudioContext timeline
-        scheduledTime = midiData.time + client.clockOffset;
+        scheduledTime = parsedData.time + client.clockOffset;
 
         // To prevent a flood of notes from a misbehaving client or clock error,
         // don't schedule things too far in the future.
@@ -236,7 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
             scheduledTime = audioContext.currentTime;
         }
 
-        handleMIDIMessage(senderId, midiData, scheduledTime);
+        handleMIDIMessage(senderId, parsedData, scheduledTime);
     });
 
     // 本地设备产生的消息
@@ -246,11 +272,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const scheduledTime = audioContext.currentTime;
         const midiData = { command: message.data[0], note: message.data[1], velocity: message.data[2], time: scheduledTime };
 
+        const binaryData = new ArrayBuffer(7);
+        const view = new DataView(binaryData);
+        view.setUint8(0, midiData.command); // Command
+        view.setUint8(1, midiData.note); // Note
+        view.setUint8(2, midiData.velocity); // Velocity
+        view.setFloat32(3, midiData.time, true); // Time in seconds
+
         // Handle locally immediately
         handleMIDIMessage(myId, midiData, scheduledTime);
 
         // Send to server with our precise audioContext timestamp
-        socket.emit('midi', midiData);
+        socket.emit('midi', arrayBufferToBase64(binaryData));
     };
 
     const handleMIDIMessage = (senderId, midiData, scheduledTime) => {
