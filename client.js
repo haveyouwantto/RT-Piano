@@ -251,7 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
             command: view.getUint8(0),
             note: view.getUint8(1),
             velocity: view.getUint8(2),
-            time: view.getFloat32(3, true) + JITTER_BUFFER_SECONDS // Add jitter buffer
+            time: view.getFloat32(3, true)
         };
 
         let scheduledTime;
@@ -267,7 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
             client.timeOffset = audioContext.currentTime - eventTime;
             console.debug(`Setting timeOffset for ${client.ip} to ${client.timeOffset.toFixed(3)}s`);
         }
-        scheduledTime = eventTime + client.timeOffset;
+        scheduledTime = eventTime + client.timeOffset + JITTER_BUFFER_SECONDS ;
 
         // To prevent a flood of notes from a misbehaving client or clock error,
         // don't schedule things too far in the future.
