@@ -220,6 +220,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    function constructMIDIMessage(midiData) {
+        const binaryData = new ArrayBuffer(7);
+        const view = new DataView(binaryData);
+        view.setUint8(0, midiData.command); // Command
+        view.setUint8(1, midiData.note); // Note
+        view.setUint8(2, midiData.velocity); // Velocity
+        view.setFloat32(3, midiData.time, true); // Time in seconds
+        // Convert ArrayBuffer to Base64 for transmission
+        return arrayBufferToBase64(binaryData);
+    }
+
     socket.on('midi', (message) => {
         const { s: senderId, m: midiData } = message;
         if (!audioContext) return; // Audio not ready
@@ -272,18 +283,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const scheduledTime = audioContext.currentTime;
         const midiData = { command: message.data[0], note: message.data[1], velocity: message.data[2], time: scheduledTime };
 
-        const binaryData = new ArrayBuffer(7);
-        const view = new DataView(binaryData);
-        view.setUint8(0, midiData.command); // Command
-        view.setUint8(1, midiData.note); // Note
-        view.setUint8(2, midiData.velocity); // Velocity
-        view.setFloat32(3, midiData.time, true); // Time in seconds
-
         // Handle locally immediately
         handleMIDIMessage(myId, midiData, scheduledTime);
 
         // Send to server with our precise audioContext timestamp
-        socket.emit('midi', arrayBufferToBase64(binaryData));
+        socket.emit('midi', constructMIDIMessage(midiData));
     };
 
     const handleMIDIMessage = (senderId, midiData, scheduledTime) => {
@@ -326,8 +330,53 @@ document.addEventListener('DOMContentLoaded', () => {
         releaseNoteVisual(midi);
     };
 
+    // 8. 键盘钢琴
+    function keyboardMidi(callback) {
+        const majorOffsets = [0, 2, 4, 5, 7, 9, 11]; // C D E F G A B
 
-    // 8. 启动
+        const rows = [
+            { keys: 'zxcvbnm', baseNote: 48 }, // C3
+            { keys: 'asdfghj', baseNote: 60 }, // C4
+            { keys: 'qwertyu', baseNote: 72 }  // C5
+        ];
+
+        const keyMap = {};
+        for (const { keys, baseNote } of rows) {
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                keyMap[key] = baseNote + majorOffsets[i];
+            }
+        }
+
+        const pressed = new Set();
+
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (keyMap.hasOwnProperty(key) && !pressed.has(key)) {
+                pressed.add(key);
+                callback(keyMap[key], 127); // Note ON
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (keyMap.hasOwnProperty(key)) {
+                pressed.delete(key);
+                callback(keyMap[key], 0); // Note OFF
+            }
+        });
+    }
+
+    keyboardMidi((note, velocity) => {
+        const scheduledTime = audioContext.currentTime;
+        const midiData = { command: 0x90, note, velocity, time: scheduledTime };
+        handleMIDIMessage(myId, midiData, scheduledTime);
+        socket.emit('midi', constructMIDIMessage(midiData));
+    });
+
+
+
+    // 9. 启动
     navigator.requestMIDIAccess?.({ sysex: false }).then(onMIDISuccess, onMIDIFailure);
     startAnimationLoop();
 
