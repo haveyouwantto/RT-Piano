@@ -6,7 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const midiDeviceSelect = document.getElementById('midi-devices');
     const noteVisualizer = document.getElementById('note-visualizer');
     const clientList = document.getElementById('client-list');
-    const JITTER_BUFFER_SECONDS = 0.150;
+    const latencyDiv = document.getElementById('latency-value');
+    let JITTER_BUFFER_SECONDS = 0.150;
 
     const real = new Float32Array([0, 1, 1.515e-2, 8.5e-3, 5.923e-3, 4.6e-3, 2.8e-2, 1.75e-2, 3.092e-3, 2.581e-3, 2.401e-3, 2.078e-3, 1.933e-3, 1.865e-3,
         1.515e-2, 1.397e-3, 1.253e-3, 1.347e-3, 1.253e-3, 1.209e-3, 1.166e-3, 4.279e-3, 1.253e-3, 1.125e-3, 1.046e-3, 9.733e-4, 1.009e-3, 9.054e-4, 9.387e-4, 8.423e-4, 8.733e-4, 8.423e-4, 8.423e-4]);
@@ -34,7 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
         clientList.innerHTML = '';
         users.forEach(user => {
             console.log(user, myId)
-            // Preserve existing client data like clockOffset when the list updates
+            // Preserve existing client data like timeOffset when the list updates
             const existingClient = clientData.get(user.id) || {};
             user.cssColor = hsvToHslCss(user.color);
             clientData.set(user.id, { ...user, ...existingClient });
@@ -56,6 +57,15 @@ document.addEventListener('DOMContentLoaded', () => {
             clientList.appendChild(li);
         });
     });
+
+    const latencyMeasurement = () => {
+        let time = performance.now();
+        socket.emit('ping', () => {
+            latencyDiv.textContent = (performance.now() - time).toFixed(1);
+        });
+    }
+    setInterval(latencyMeasurement, 10000);
+    setTimeout(latencyMeasurement, 1000);
 
     // 2. 音频与MIDI初始化
     const initAudioContext = () => {

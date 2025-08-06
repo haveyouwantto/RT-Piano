@@ -9,12 +9,9 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 1. Generate a self-signed certificate
-// In a real-world scenario, you would use a trusted certificate authority (CA)
-// The following is for development purposes only.
-// To use this, you'll need to create 'cert.pem' and 'key.pem' files in a 'ssl' directory.
-// You can use OpenSSL to generate these files with a command like:
-// openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365
+// 1. Use self-signed certificates for HTTPS
+
+// This is for development purposes only. You should use a trusted certificate authority (CA) in production.
 const options = {
     key: fs.readFileSync(path.join(__dirname, 'ssl', 'key.pem')),
     cert: fs.readFileSync(path.join(__dirname, 'ssl', 'cert.pem'))
@@ -35,7 +32,7 @@ let autoIncrementId = 0;
 
 function intToBase64(num) {
     if (num < 0 || !Number.isInteger(num)) {
-        throw new Error('输入必须是非负整数');
+        throw new Error('Invalid input');
     }
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     if (num === 0) return chars[0];
@@ -92,6 +89,10 @@ io.on('connection', (socket) => {
         console.log(`User ${socket.shortId} disconnected.`);
         delete connectedClients[socket.shortId];
         updateUserList();
+    });
+
+    socket.on("ping", (callback) => {
+        callback();
     });
 });
 
