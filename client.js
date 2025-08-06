@@ -146,10 +146,10 @@ document.addEventListener('DOMContentLoaded', () => {
         activeAudioNodes.set(midi, { oscillator, envelope });
     };
 
-    const stopNoteAudio = (midi) => {
+    const stopNoteAudio = (midi, scheduledTime) => {
         const node = activeAudioNodes.get(midi);
         if (node && audioContext) {
-            const now = audioContext.currentTime;
+            const now = scheduledTime ?? audioContext.currentTime;
             // Smoothly ramp down the volume from its current value
             node.envelope.gain.cancelScheduledValues(now);
             node.envelope.gain.setTargetAtTime(0, now, 0.1); // Fast release
@@ -309,11 +309,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     playNote(note, velocity, senderId, scheduledTime);
                 } else {
                     // Note On with velocity 0 is often used as Note Off
-                    // stopNote(note);
+                    stopNote(note, scheduledTime);
                 }
                 break;
             case 0x80: // Note Off
-                // stopNote(note);
+                stopNote(note);
                 break;
         }
     };
@@ -333,10 +333,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }, visualDelayMs);
     };
 
-    const stopNote = (midi) => {
+    const stopNote = (midi, scheduledTime) => {
         // Note Off events are handled immediately upon receipt.
-        stopNoteAudio(midi);
-        releaseNoteVisual(midi);
+        stopNoteAudio(midi, scheduledTime);
+        // releaseNoteVisual(midi);
+        setTimeout(() => {
+            releaseNoteVisual(midi);
+        }, Math.max(0, (scheduledTime - audioContext.currentTime) * 1000));
     };
 
     // 8. 键盘钢琴
