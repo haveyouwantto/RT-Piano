@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
             latencyDiv.textContent = (latency).toFixed(1);
 
             // 更新抖动缓冲时间
-            JITTER_BUFFER_SECONDS = Math.min(1, ((latency / 1000) * 0.5 + JITTER_BUFFER_SECONDS * 0.5))
+            JITTER_BUFFER_SECONDS = Math.min(1, ((latency / 1000) * 0.2 + JITTER_BUFFER_SECONDS * 0.8))
             console.log(`Latency: ${latency.toFixed(1)} ms, Jitter Buffer: ${JITTER_BUFFER_SECONDS.toFixed(3)} seconds`);
         });
     }
@@ -272,7 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
             client.timeOffset = audioContext.currentTime - eventTime;
             console.debug(`Setting timeOffset for ${client.ip} to ${client.timeOffset.toFixed(3)}s`);
         }
-        scheduledTime = eventTime + client.timeOffset + JITTER_BUFFER_SECONDS;
+        scheduledTime = eventTime + client.timeOffset + JITTER_BUFFER_SECONDS * 2;
 
         // To prevent a flood of notes from a misbehaving client or clock error,
         // don't schedule things too far in the future.
