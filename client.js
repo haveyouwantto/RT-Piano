@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
             swatch.className = 'client-color-swatch';
             swatch.style.backgroundColor = hsvToHslCss(user.color);
 
-            const name = document.createTextNode(`用户: ${user.ip}`);
+            const name = document.createTextNode(user.ip);
 
             li.appendChild(swatch);
             li.appendChild(name);
