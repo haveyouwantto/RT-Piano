@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const midiDeviceSelect = document.getElementById('midi-devices');
     const noteVisualizer = document.getElementById('note-visualizer');
     const clientList = document.getElementById('client-list');
+    const JITTER_BUFFER_SECONDS = 0.150;
 
     // 状态与配置
     let audioContext;
@@ -25,10 +26,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 更新用户列表
     socket.on('update-user-list', (users) => {
-        clientData.clear();
         clientList.innerHTML = '';
         users.forEach(user => {
-            clientData.set(user.id, user); // 存储完整用户数据
+            // Preserve existing client data like clockOffset when the list updates
+            const existingClient = clientData.get(user.id) || {};
+            clientData.set(user.id, { ...user, ...existingClient });
 
             const li = document.createElement('li');
             const swatch = document.createElement('span');
@@ -83,17 +85,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const isSharp = (midi) => [1, 3, 6, 8, 10].includes(midi % 12);
 
     // 4. 音频播放逻辑
-    const playNoteAudio = (midi, velocity) => {
+    const playNoteAudio = (midi, velocity, time) => {
         if (!audioContext) return;
 
         const gainValue = velocity / 127;
         const freq = Math.pow(2, (midi - 69) / 12) * 440;
 
-        const time = audioContext.currentTime;
-        const decayTime = 0.3 * Math.pow(2, (69 - midi) / 24);
+        const decayTime = 0.2 * Math.pow(2, (69 - midi) / 24);
         const envelope = audioContext.createGain();
         envelope.gain.setValueAtTime(0, time);
-        envelope.gain.setTargetAtTime(gainValue, time, 0.002);
+        envelope.gain.linearRampToValueAtTime(gainValue, time + 0.002); // More responsive attack
         envelope.gain.setTargetAtTime(0, time + 0.01, decayTime);
 
         const oscillator = audioContext.createOscillator();
@@ -102,6 +103,9 @@ document.addEventListener('DOMContentLoaded', () => {
         oscillator.connect(envelope).connect(compressor);
         oscillator.start(time);
 
+        // Schedule the stop time far enough in the future to allow for decay
+        oscillator.stop(time + decayTime * 5); // Ensure oscillator is cleaned up
+
         activeAudioNodes.set(midi, { oscillator, envelope });
     };
 
@@ -109,10 +113,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const node = activeAudioNodes.get(midi);
         if (node && audioContext) {
             const now = audioContext.currentTime;
+            // Smoothly ramp down the volume from its current value
             node.envelope.gain.cancelScheduledValues(now);
-            node.envelope.gain.setValueAtTime(node.envelope.gain.value, now);
-            node.envelope.gain.linearRampToValueAtTime(0, now + 0.3);
-            node.oscillator.stop(now + 0.3);
+            node.envelope.gain.setTargetAtTime(0, now, 0.1); // Fast release
+            node.oscillator.stop(now + 0.5); // Stop after release
             activeAudioNodes.delete(midi);
         }
     };
@@ -190,80 +194,91 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     socket.on('midi', (message) => {
-        let delayTime = 0;
-        const baseLatency = 0.1; // 基础延迟，单位为秒
-        const playerId = message.senderId;
-        const client = clientData.get(playerId);
-        const now = audioContext.currentTime;
-        const time = message.midiData.time || now; // 使用消息中的时间戳或当前时间
-        if (playerId !== myId) {
-            const lastEventTime = client?.lastEventTime || 0;
-            const lastEventLocalTime = client?.lastEventLocalTime || audioContext.currentTime;
+        const { senderId, midiData } = message;
+        if (!audioContext) return; // Audio not ready
 
-            const timeDelta = time - lastEventTime;
-            const localTimeDelta = now - lastEventLocalTime;
-            // 计算延迟时间，确保不会小于0
-            delayTime = timeDelta - localTimeDelta;
-            console.log(delayTime)
+        let scheduledTime;
+        const client = clientData.get(senderId);
 
-            // 更新该用户的最后事件时间
-            if (client) {
-                client.lastEventTime = time;
-                client.lastEventLocalTime = now;
-            }
-        }
-        delayTime += baseLatency; // 添加基础延迟
+        // This should not happen if the server is working correctly, but as a safeguard:
+        if (!client) return;
 
-        if (delayTime < 0) {
-            delayTime = 0;
+        // If clockOffset is not yet calculated for this client, calculate it now.
+        if (client.clockOffset === undefined) {
+            // Offset = local time when we received message - time the message was sent + buffer
+            client.clockOffset = audioContext.currentTime - midiData.time + JITTER_BUFFER_SECONDS;
+            console.log(`Initialized clock offset for ${client.ip}: ${client.clockOffset.toFixed(3)}s`);
         }
 
-        if (delayTime > 0) {
-            setTimeout(() => {
-                handleMIDIMessage(message);
-            }, delayTime);
-        }else {
-            handleMIDIMessage(message);
+        // The scheduled play time on our local AudioContext timeline
+        scheduledTime = midiData.time + client.clockOffset;
+
+        // To prevent a flood of notes from a misbehaving client or clock error,
+        // don't schedule things too far in the future.
+        if (scheduledTime > audioContext.currentTime + 10) {
+            console.warn("Note scheduled too far in the future, ignoring.");
+            return;
         }
+
+        // If the note is already late, play it ASAP but log the tardiness.
+        if (scheduledTime < audioContext.currentTime) {
+            console.log(`Note from ${client.ip} is late by ${(audioContext.currentTime - scheduledTime).toFixed(3)}s. Playing now.`);
+            scheduledTime = audioContext.currentTime;
+        }
+
+        handleMIDIMessage(senderId, midiData, scheduledTime);
     });
 
     // 本地设备产生的消息
     const getMIDIMessage = (message) => {
         if (!audioContext) initAudioContext();
-        const midiData = { command: message.data[0], note: message.data[1], velocity: message.data[2], time: audioContext.currentTime };
-        // 本地消息直接用自己的ID处理，并发送给服务器
-        handleMIDIMessage({ senderId: myId, midiData: midiData });
+        // For local messages, the scheduled time is *now*.
+        const scheduledTime = audioContext.currentTime;
+        const midiData = { command: message.data[0], note: message.data[1], velocity: message.data[2], time: scheduledTime };
+
+        // Handle locally immediately
+        handleMIDIMessage(myId, midiData, scheduledTime);
+
+        // Send to server with our precise audioContext timestamp
         socket.emit('midi', midiData);
     };
 
-    const handleMIDIMessage = ({ senderId, midiData }) => {
-        if (!senderId) return; // 如果没有发送者ID，则忽略
-        const { command, note, velocity, time } = midiData;
+    const handleMIDIMessage = (senderId, midiData, scheduledTime) => {
+        if (!senderId) return;
+        const { command, note, velocity } = midiData;
+
         switch (command & 0xF0) {
             case 0x90: // Note On
-                velocity > 0 ? playNote(note, velocity, senderId, time) : stopNote(note);
+                if (velocity > 0) {
+                    playNote(note, velocity, senderId, scheduledTime);
+                } else {
+                    // Note On with velocity 0 is often used as Note Off
+                    // stopNote(note);
+                }
                 break;
             case 0x80: // Note Off
-                stopNote(note);
+                // stopNote(note);
                 break;
         }
     };
 
-    const playNote = (midi, velocity, playerId, time) => {
-        // 同一用户弹奏自己已按下的音符时，先停止旧的
-        // if (visualNotes.has(midi)) {
-        //     stopNote(midi);
-        // }
-
-        const baseLatency = 0; // 基础延迟，单位为秒
-        const now = audioContext.currentTime;
+    const playNote = (midi, velocity, playerId, scheduledTime) => {
         const client = clientData.get(playerId);
+        if (!client) return;
 
-        playNoteAudio(midi, velocity);
-        createNoteVisual(midi, hsvToHslCss(client.color));
+        // Schedule the audio to play at the precise time
+        playNoteAudio(midi, velocity, scheduledTime);
+
+        // Schedule the VISUAL update to happen at the same time using setTimeout
+        const visualDelayMs = Math.max(0, (scheduledTime - audioContext.currentTime) * 1000);
+
+        setTimeout(() => {
+            createNoteVisual(midi, hsvToHslCss(client.color));
+        }, visualDelayMs);
     };
 
     const stopNote = (midi) => {
+        // Note Off events are handled immediately upon receipt.
         stopNoteAudio(midi);
         releaseNoteVisual(midi);
     };
